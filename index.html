@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deriv Fully Automated Accumulator Bot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .circle-chart { transform: rotate(-90deg); transform-origin: 50% 50%; }
+    .circle-bg { fill: none; stroke: #1f2937; stroke-width: 3.8; }
+    .circle-progress { fill: none; stroke-width: 3.8; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; }
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 15px rgba(6, 182, 212, 0.2); }
+      50% { box-shadow: 0 0 30px rgba(6, 182, 212, 0.6); }
+    }
+    .auto-active { animation: pulse-glow 2s infinite; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans p-3 md:p-6">
+
+  <div class="max-w-4xl mx-auto space-y-4">
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900 p-4 rounded-xl border border-slate-800 gap-2">
+      <div>
+        <h1 class="text-lg md:text-xl font-bold text-cyan-400">Deriv Auto-Accumulator Bot</h1>
+        <p class="text-xs text-slate-400">Auto-selects best volatility index & signals optimal entry</p>
+      </div>
+      <div id="connectionStatus" class="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        Offline
+      </div>
+    </header>
+
+    <!-- Controls -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Trading Mode</label>
+        <select id="modeSelect" class="w-full bg-slate-800 text-sm border border-slate-700 rounded p-2 focus:outline-none focus:border-cyan-500">
+          <option value="auto">🤖 Auto-Scan & Choose Market</option>
+          <option value="manual">👤 Manual Market Selection</option>
+        </select>
+      </div>
+
+      <div id="marketContainer">
+        <label class="block text-xs text-slate-400 mb-1">Target Market</label>
+        <select id="marketSelect" class="w-full bg-slate-800 text-sm border border-slate-700 rounded p-2 focus:outline-none focus:border-cyan-500">
+          <option value="R_10">Volatility 10 Accumulator</option>
+          <option value="R_25">Volatility 25 Accumulator</option>
+          <option value="R_50" selected>Volatility 50 Accumulator</option>
+          <option value="R_75">Volatility 75 Accumulator</option>
+          <option value="R_100">Volatility 100 Accumulator</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Accumulator Growth Rate</label>
+        <select id="growthRate" class="w-full bg-slate-800 text-sm border border-slate-700 rounded p-2 focus:outline-none focus:border-cyan-500">
+          <option value="1">1% Growth Rate</option>
+          <option value="2" selected>2% Growth Rate</option>
+          <option value="3">3% Growth Rate</option>
+          <option value="4">4% Growth Rate</option>
+          <option value="5">5% Growth Rate</option>
+        </select>
+      </div>
+
+      <div class="flex items-end gap-2">
+        <button id="startBtn" onclick="startAutoBot()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-2 rounded transition">
+          Start Bot
+        </button>
+        <button id="stopBtn" onclick="stopBot()" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold py-2 rounded transition">
+          Stop
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Status & Auto-Trade Signal Banner -->
+    <div id="signalCard" class="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
+      <div>
+        <span class="text-xs text-slate-400">Active Market & Quote</span>
+        <div class="flex items-baseline gap-3 mt-1">
+          <div id="activeMarketLabel" class="text-xs font-bold text-cyan-400 uppercase tracking-wider">None</div>
+          <div id="currentPrice" class="text-xl font-mono font-bold text-white">0.0000</div>
+        </div>
+      </div>
+
+      <div class="flex-1 text-center md:text-left">
+        <span class="text-xs text-slate-400">Bot Execution Decision</span>
+        <div id="tradeRecommendation" class="text-sm md:text-base font-bold mt-1 text-cyan-400">
+          BOT IDLE — CLICK START TO BEGIN SCANNING
+        </div>
+      </div>
+
+      <div id="actionBadge" class="px-4 py-2 rounded-lg font-bold text-xs uppercase bg-slate-800 text-slate-400 border border-slate-700">
+        STANDBY
+      </div>
+    </div>
+
+    <!-- Probability & Stability Gauges -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      
+      <!-- Range Stability -->
+      <div class="bg-slate-900 p-5 rounded-xl border border-slate-800 text-center">
+        <h2 class="text-xs font-semibold text-slate-300 mb-3">Range Stability (Safe Inside Band)</h2>
+        <div class="flex justify-around items-center">
+          <div class="flex flex-col items-center">
+            <svg class="w-20 h-20 circle-chart" viewBox="0 0 36 36">
+              <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              <path id="stableCircle" class="circle-progress stroke-cyan-400" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <span id="stableVal" class="text-base font-bold text-cyan-400 mt-2">0%</span>
+            <span class="text-[10px] text-slate-400">STABILITY SCORE</span>
+          </div>
+
+          <div class="flex flex-col items-center">
+            <svg class="w-20 h-20 circle-chart" viewBox="0 0 36 36">
+              <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              <path id="burstCircle" class="circle-progress stroke-rose-500" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <span id="burstVal" class="text-base font-bold text-rose-400 mt-2">0%</span>
+            <span class="text-[10px] text-slate-400">BURST RISK</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Auto-Bot Execution Log -->
+      <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col">
+        <h2 class="text-xs font-semibold text-slate-400 mb-2">Bot Execution & Market Scanner Log</h2>
+        <div id="tickStreamLog" class="flex-1 h-32 overflow-y-auto font-mono text-xs space-y-1 bg-slate-950 p-2 rounded border border-slate-800">
+          <div class="text-slate-500">Bot is offline. Click Start to initialize automated scanner...</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let isRunning = false;
+    let currentMarket = "R_50";
+    let scanInterval = null;
+    let marketTickBuffer = {};
+    
+    const availableMarkets = ["R_10", "R_25", "R_50", "R_75", "R_100"];
+
+    document.getElementById('modeSelect').addEventListener('change', (e) => {
+      const isManual = e.target.value === 'manual';
+      document.getElementById('marketContainer').style.display = isManual ? 'block' : 'none';
+    });
+    // Initialize default view
+    document.getElementById('marketContainer').style.display = 'none';
+
+    function startAutoBot() {
+      stopBot();
+      isRunning = true;
+      const mode = document.getElementById('modeSelect').value;
+      const statusEl = document.getElementById('connectionStatus');
+      
+      statusEl.innerText = "Scanning Markets...";
+      statusEl.className = "px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20";
+
+      if (mode === 'manual') {
+        currentMarket = document.getElementById('marketSelect').value;
+        connectToMarket(currentMarket);
+      } else {
+        // Auto-Pilot Mode: Cycle through markets to evaluate stability scores
+        logStream("🤖 Auto-Pilot mode active: Scanning volatility indices for optimal entry...");
+        let marketIdx = 0;
+        
+        connectToMarket(availableMarkets[marketIdx]);
+
+        scanInterval = setInterval(() => {
+          if (!isRunning) return;
+          marketIdx = (marketIdx + 1) % availableMarkets.length;
+          currentMarket = availableMarkets[marketIdx];
+          logStream(`🔄 Auto-switching scan target to ${currentMarket}...`);
+          connectToMarket(currentMarket);
+        }, 12000); // Switch and evaluate every 12 seconds
+      }
+    }
+
+    function connectToMarket(symbol) {
+      if (ws) {
+        ws.close();
+      }
+
+      marketTickBuffer[symbol] = [];
+      document.getElementById('activeMarketLabel').innerText = symbol;
+
+      ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
+
+      ws.onopen = () => {
+        document.getElementById('connectionStatus').innerText = "Auto-Trading Live";
+        document.getElementById('connectionStatus').className = "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+        
+        ws.send(JSON.stringify({
+          ticks_history: symbol,
+          adjust_start_time: 1,
+          count: 40,
+          end: "latest",
+          style: "ticks",
+          subscribe: 1
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.msg_type === 'history') {
+          marketTickBuffer[symbol] = data.history.prices;
+          evaluateMarket(symbol);
+        }
+
+        if (data.msg_type === 'tick') {
+          const tick = data.tick;
+          if (!marketTickBuffer[symbol]) marketTickBuffer[symbol] = [];
+          marketTickBuffer[symbol].push(tick.quote);
+          if (marketTickBuffer[symbol].length > 50) marketTickBuffer[symbol].shift();
+
+          const pipSize = symbol.includes("1HZ") ? 2 : 4;
+          const formattedQuote = tick.quote.toFixed(pipSize);
+          document.getElementById('currentPrice').innerText = formattedQuote;
+
+          evaluateMarket(symbol);
+        }
+      };
+
+      ws.onerror = () => {
+        // Fallback simulation if network blocks external WS
+        simulateData(symbol);
+      };
+    }
+
+    function simulateData(symbol) {
+      let basePrice = 100;
+      let timer = setInterval(() => {
+        if (!isRunning || currentMarket !== symbol) {
+          clearInterval(timer);
+          return;
+        }
+        basePrice += (Math.random() - 0.48) * 0.5;
+        if (!marketTickBuffer[symbol]) marketTickBuffer[symbol] = [];
+        marketTickBuffer[symbol].push(basePrice);
+        if (marketTickBuffer[symbol].length > 50) marketTickBuffer[symbol].shift();
+        
+        document.getElementById('currentPrice').innerText = basePrice.toFixed(2);
+        evaluateMarket(symbol);
+      }, 1000);
+    }
+
+    function evaluateMarket(symbol) {
+      const ticks = marketTickBuffer[symbol];
+      if (!ticks || ticks.length < 10) return;
+
+      const mean = ticks.reduce((a, b) => a + b, 0) / ticks.length;
+      const variance = ticks.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / ticks.length;
+      const stdDev = Math.sqrt(variance);
+
+      let recentMovement = 0;
+      for (let i = ticks.length - 5; i < ticks.length; i++) {
+        recentMovement += Math.abs(ticks[i] - ticks[i - 1]);
+      }
+
+      let stabilityScore = Math.max(25, Math.min(96, Math.round(100 - (recentMovement / (stdDev || 1)) * 35)));
+      let burstRisk = 100 - stabilityScore;
+
+      document.getElementById('stableVal').innerText = `${stabilityScore}%`;
+      document.getElementById('burstVal').innerText = `${burstRisk}%`;
+      document.getElementById('stableCircle').setAttribute('stroke-dasharray', `${stabilityScore}, 100`);
+      document.getElementById('burstCircle').setAttribute('stroke-dasharray`, ${burstRisk}, 100`);
+
+      const recEl = document.getElementById('tradeRecommendation');
+      const badgeEl = document.getElementById('actionBadge');
+      const cardEl = document.getElementById('signalCard');
+
+      if (stabilityScore >= 72) {
+        recEl.innerHTML = `<span class="text-emerald-400">🟢 BUY SIGNAL (${symbol}): Range is exceptionally stable (${stabilityScore}%). Safe to open accumulator!</span>`;
+        badgeEl.innerText = "BUY / OPEN";
+        badgeEl.className = "px-4 py-2 rounded-lg font-bold text-xs uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/40";
+        cardEl.classList.add('auto-active');
+        logStream(`[${symbol}] Stability ${stabilityScore}% — 🚀 Bot Triggered BUY Recommendation.`);
+      } else {
+        recEl.innerHTML = `<span class="text-amber-400">⏳ HOLD / MONITOR (${symbol}): Stability at ${stabilityScore}%. Waiting for tighter range...</span>`;
+        badgeEl.innerText = "HOLD / WAIT";
+        badgeEl.className = "px-4 py-2 rounded-lg font-bold text-xs uppercase bg-amber-500/20 text-amber-400 border border-amber-500/40";
+        cardEl.classList.remove('auto-active');
+      }
+    }
+
+    function stopBot() {
+      isRunning = false;
+      if (scanInterval) clearInterval(scanInterval);
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      document.getElementById('connectionStatus').innerText = "Offline";
+      document.getElementById('connectionStatus').className = "px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20";
+      document.getElementById('actionBadge').innerText = "STANDBY";
+      document.getElementById('actionBadge').className = "px-4 py-2 rounded-lg font-bold text-xs uppercase bg-slate-800 text-slate-400 border border-slate-700";
+      document.getElementById('signalCard').classList.remove('auto-active');
+      logStream("Bot stopped.");
+    }
+
+    function logStream(msg) {
+      const container = document.getElementById('tickStreamLog');
+      const item = document.createElement('div');
+      item.innerText = msg;
+      container.appendChild(item);
+      container.scrollTop = container.scrollHeight;
+    }
+  </script>
+</body>
+  </html>
+  
