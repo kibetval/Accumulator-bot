@@ -149,6 +149,7 @@
     document.getElementById('marketContainer').style.display = 'none';
 
     function startAutoBot() {
+      console.log('startAutoBot called');
       stopBot();
       isRunning = true;
       const mode = document.getElementById('modeSelect').value;
@@ -178,8 +179,9 @@
     }
 
     function connectToMarket(symbol) {
+      console.log('connectToMarket', symbol);
       if (ws) {
-        ws.close();
+        try { ws.close(); } catch (e) { console.warn(e); }
       }
 
       marketTickBuffer[symbol] = [];
@@ -188,6 +190,7 @@
       ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1089');
 
       ws.onopen = () => {
+        console.log('ws open for', symbol);
         document.getElementById('connectionStatus').innerText = "Auto-Trading Live";
         document.getElementById('connectionStatus').className = "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
         
@@ -202,30 +205,43 @@
       };
 
       ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+        try {
+          const data = JSON.parse(event.data);
 
-        if (data.msg_type === 'history') {
-          marketTickBuffer[symbol] = data.history.prices;
-          evaluateMarket(symbol);
-        }
+          if (data.msg_type === 'history') {
+            marketTickBuffer[symbol] = data.history.prices;
+            evaluateMarket(symbol);
+          }
 
-        if (data.msg_type === 'tick') {
-          const tick = data.tick;
-          if (!marketTickBuffer[symbol]) marketTickBuffer[symbol] = [];
-          marketTickBuffer[symbol].push(tick.quote);
-          if (marketTickBuffer[symbol].length > 50) marketTickBuffer[symbol].shift();
+          if (data.msg_type === 'tick') {
+            const tick = data.tick;
+            if (!marketTickBuffer[symbol]) marketTickBuffer[symbol] = [];
+            marketTickBuffer[symbol].push(tick.quote);
+            if (marketTickBuffer[symbol].length > 50) marketTickBuffer[symbol].shift();
 
-          const pipSize = symbol.includes("1HZ") ? 2 : 4;
-          const formattedQuote = tick.quote.toFixed(pipSize);
-          document.getElementById('currentPrice').innerText = formattedQuote;
+            const pipSize = symbol.includes("1HZ") ? 2 : 4;
+            const formattedQuote = Number(tick.quote).toFixed(pipSize);
+            document.getElementById('currentPrice').innerText = formattedQuote;
 
-          evaluateMarket(symbol);
+            evaluateMarket(symbol);
+          }
+
+          if (data.error) {
+            logStream(`API Error: ${data.error.message || JSON.stringify(data.error)}`);
+          }
+        } catch (e) {
+          console.error('ws.onmessage parse error', e);
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (err) => {
+        console.warn('ws.onerror', err);
         // Fallback simulation if network blocks external WS
         simulateData(symbol);
+      };
+
+      ws.onclose = (ev) => {
+        console.log('ws closed', ev);
       };
     }
 
@@ -256,7 +272,7 @@
 
       let recentMovement = 0;
       for (let i = ticks.length - 5; i < ticks.length; i++) {
-        recentMovement += Math.abs(ticks[i] - ticks[i - 1]);
+        if (i > 0) recentMovement += Math.abs(ticks[i] - ticks[i - 1]);
       }
 
       let stabilityScore = Math.max(25, Math.min(96, Math.round(100 - (recentMovement / (stdDev || 1)) * 35)));
@@ -265,7 +281,7 @@
       document.getElementById('stableVal').innerText = `${stabilityScore}%`;
       document.getElementById('burstVal').innerText = `${burstRisk}%`;
       document.getElementById('stableCircle').setAttribute('stroke-dasharray', `${stabilityScore}, 100`);
-      document.getElementById('burstCircle').setAttribute('stroke-dasharray`, ${burstRisk}, 100`);
+      document.getElementById('burstCircle').setAttribute('stroke-dasharray', `${burstRisk}, 100`);
 
       const recEl = document.getElementById('tradeRecommendation');
       const badgeEl = document.getElementById('actionBadge');
@@ -310,4 +326,3 @@
   </script>
 </body>
   </html>
-  
